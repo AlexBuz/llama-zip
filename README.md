@@ -1,6 +1,6 @@
 # llama-zip
 
-`llama-zip` is a command-line utility for lossless text compression and decompression. It functions by leveraging a user-provided LLM (large language model) as the probabilistic model for an [arithmetic coder](https://en.wikipedia.org/wiki/Arithmetic_coding). This allows `llama-zip` to achieve high compression ratios for structured or natural language text, as fewer bits are needed to encode tokens that the LLM assigns high probabilities to. However, compression and decompression speeds are limited by the LLM's inference speed, and the maximum size of the input text is limited by the LLM's context window size.
+`llama-zip` is a command-line utility for lossless text compression and decompression. It functions by leveraging a user-provided LLM (large language model) as the probabilistic model for an [arithmetic coder](https://en.wikipedia.org/wiki/Arithmetic_coding). This allows `llama-zip` to achieve high compression ratios for structured or natural language text, as fewer bits are needed to encode tokens that the LLM assigns high probabilities to. Note, though, that compression and decompression speeds are limited by the LLM's inference speed, and the maximum size of the input text is limited (for now, pending a batching feature) by the LLM's context window size.
 
 ![Interactive Mode Demo: Lorem Ipsum Text](lorem_ipsum_demo.gif)
 

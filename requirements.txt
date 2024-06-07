@@ -1,0 +1,8 @@
+diskcache==5.6.3
+Jinja2==3.1.4
+llama_cpp_python==0.2.77
+MarkupSafe==2.1.5
+more-itertools==10.2.0
+numpy==1.26.4
+tqdm==4.66.4
+typing_extensions==4.12.1

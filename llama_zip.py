@@ -1,3 +1,4 @@
+import argparse
 import signal
 import string
 import sys
@@ -119,7 +120,7 @@ def compute_cdf(logits):
     return cum_freqs
 
 
-def compress(string):
+def compress(string, window_overlap):
     def bits_to_base64(bits):
         while bits and bits[-1] == 0:
             bits.pop()
@@ -135,49 +136,52 @@ def compress(string):
         interrupted = True
 
     def process_logits(_, logits):
-        if interrupted and len(tokens) > 1:
-            tokens.clear()
-            tokens.append(model.token_eos())
+        nonlocal next_token_idx
+        if interrupted and next_token_idx < len(tokens) - 1:
+            next_token_idx = len(tokens) - 1
             print(file=sys.stderr)
-        next_token = tokens.popleft()
+        next_token = tokens[next_token_idx]
+        next_token_idx += 1
         cdf = compute_cdf(logits)
         encoder.encode_symbol(cdf, next_token)
+        progress_bar.update()
         logits[next_token] = np.inf
         return logits
 
-    def should_stop(_, logits):
-        return np.argmax(logits) == model.token_eos()
+    def should_stop(tokens_so_far, logits):
+        return (
+            np.argmax(logits) == model.token_eos()
+            or len(tokens_so_far) == model.n_ctx()
+        )
 
     model.reset()
-    tokens = deque(model.tokenize(string.encode("utf-8"), add_bos=False))
-    if len(tokens) >= model.n_ctx():
-        print(
-            f"Error: Input length ({len(tokens)} tokens) exceeds maximum for model ({model.n_ctx() - 1} tokens).",
-            file=sys.stderr,
-        )
-        exit(1)
+    tokens = model.tokenize(string.encode("utf-8"), add_bos=False)
     tokens.append(model.token_eos())
+    next_token_idx = 0
     encoder = Encoder()
 
     interrupted = False
     s = signal.signal(signal.SIGINT, sigint_handler)
 
-    consume(
-        tqdm(
+    progress_bar = tqdm(
+        total=len(tokens),
+        mininterval=1 / 30,
+        desc="Compressing",
+        unit="tok",
+        leave=False,
+        dynamic_ncols=True,
+    )
+    while next_token_idx < len(tokens):
+        start_idx = max(0, next_token_idx - window_overlap)
+        consume(
             model.generate(
-                tokens=[model.token_bos()],
+                tokens=[model.token_bos()] + tokens[start_idx:next_token_idx],
                 temp=0.0,
                 logits_processor=process_logits,
                 stopping_criteria=should_stop,
-            ),
-            total=len(tokens) - 1,
-            mininterval=1 / 30,
-            desc="Compressing",
-            unit="tok",
-            leave=False,
-            dynamic_ncols=True,
+            )
         )
-    )
+    progress_bar.close()
 
     encoder.finish()
     compressed = bits_to_base64(encoder.get_encoded())
@@ -188,7 +192,7 @@ def compress(string):
     return compressed
 
 
-def decompress(compressed):
+def decompress(compressed, window_overlap):
     def base64_to_bits(string):
         bits = [int(bit) for char in string for bit in f"{BASE64.index(char):06b}"]
         return bits
@@ -208,38 +212,30 @@ def decompress(compressed):
             pass
         return logits
 
-    def should_stop(_, logits):
-        return np.argmax(logits) == model.token_eos()
+    def should_stop(tokens_so_far, logits):
+        nonlocal done
+        if np.argmax(logits) == model.token_eos():
+            done = True
+        return done or len(tokens_so_far) == model.n_ctx()
 
     model.reset()
     tokens = []
     encoded = base64_to_bits(compressed)
     decoder = Decoder(encoded)
     output_buf = bytearray()
-    consume(
-        model.generate(
-            tokens=[model.token_bos()],
-            temp=0.0,
-            logits_processor=process_logits,
-            stopping_criteria=should_stop,
+    done = False
+    while not done:
+        overlap_start_idx = max(0, len(tokens) - window_overlap)
+        consume(
+            model.generate(
+                tokens=[model.token_bos()] + tokens[overlap_start_idx:],
+                temp=0.0,
+                logits_processor=process_logits,
+                stopping_criteria=should_stop,
+            )
         )
-    )
     decompressed = model.detokenize(tokens).decode("utf-8")
     return decompressed
-
-
-def print_usage_and_exit():
-    print(
-        f"""\
-Usage: {sys.argv[0]} <llm_path> <mode>
-Modes:
-  -c, --compress [string]
-  -d, --decompress [compressed_string]
-  -i, --interactive
-For compression and decompression, the input is read from stdin if not provided as an argument.""",
-        file=sys.stderr,
-    )
-    exit(1)
 
 
 def load_model(model_path):
@@ -251,7 +247,6 @@ def load_model(model_path):
         n_gpu_layers=-1,
         verbose=False,
         use_mlock=True,
-        logits_all=True,
         n_ctx=0,
     )
     print("\r" + " " * len(loading_message) + "\r", end="", flush=True, file=sys.stderr)
@@ -259,48 +254,83 @@ def load_model(model_path):
 
 
 def main():
-    try:
-        global model_path
-        model_path = sys.argv[1]
-    except IndexError:
-        print_usage_and_exit()
+    parser = argparse.ArgumentParser(
+        description="LLM-powered lossless compression tool"
+    )
+
+    parser.add_argument("model_path", help="path to a .gguf model file")
+
+    parser.add_argument(
+        "-w",
+        "--window-overlap",
+        type=int,
+        default=0,
+        help="number of tokens to overlap between windows when input exceeds model context size (default: 0)",
+    )
+
+    mode_group = parser.add_mutually_exclusive_group(required=True)
+    mode_group.add_argument(
+        "-c",
+        "--compress",
+        dest="string",
+        nargs="*",
+        help="comppress input string or stdin",
+    )
+    mode_group.add_argument(
+        "-d",
+        "--decompress",
+        dest="compressed",
+        nargs="*",
+        help="decompress input string or stdin",
+    )
+    mode_group.add_argument(
+        "-i",
+        "--interactive",
+        dest="interactive",
+        default=False,
+        action="store_true",
+        help="show a prompt for interactive compression and decompression",
+    )
+
+    args = parser.parse_args()
+
+    load_model(args.model_path)
+
+    window_overlap = (
+        args.window_overlap
+        if args.window_overlap >= 0
+        else args.window_overlap + model.n_ctx()
+    )
+
+    if not (0 <= window_overlap < model.n_ctx()):
+        parser.error(
+            f"Window overlap must be in the range [{-model.n_ctx()}, {model.n_ctx() - 1}]"
+        )
 
     try:
-        mode = sys.argv[2]
-    except IndexError:
-        print_usage_and_exit()
-
-    try:
-        if mode in ["-c", "--compress"]:
-            try:
-                string = " ".join([sys.argv[3], *sys.argv[4:]])
-            except IndexError:
-                string = sys.stdin.read()
-            load_model(model_path)
-            compress(string)
-        elif mode in ["-d", "--decompress"]:
-            try:
-                compressed = sys.argv[3]
-            except IndexError:
-                compressed = sys.stdin.read().strip()
-            load_model(model_path)
-            decompress(compressed)
-        elif mode in ["-i", "--interactive"]:
-            load_model(model_path)
+        if args.string is not None:
+            string = " ".join(args.string) if args.string else sys.stdin.read()
+            compress(string, window_overlap)
+        elif args.compressed is not None:
+            compressed = (
+                args.compressed[0] if args.compressed else sys.stdin.read().strip()
+            )
+            if not all(char in BASE64 for char in compressed):
+                parser.error("Invalid compressed string")
+            decompress(compressed, window_overlap)
+        elif args.interactive:
             while True:
                 print("≥≥≥", end=" ", flush=True, file=sys.stderr)
                 string = input()
                 if string and all(char in BASE64 for char in string):
                     try:
-                        decompress(string)
+                        decompress(string, window_overlap)
                     except KeyboardInterrupt:
                         pass
                     print(file=sys.stderr)
                 else:
-                    compress(string)
+                    compress(string, window_overlap)
                 print(file=sys.stderr)
-        else:
-            print_usage_and_exit()
     except KeyboardInterrupt:
         print(file=sys.stderr)
 

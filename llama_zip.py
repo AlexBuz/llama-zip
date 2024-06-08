@@ -238,13 +238,13 @@ def decompress(compressed, window_overlap):
     return decompressed
 
 
-def load_model(model_path):
+def load_model(model_path, n_gpu_layers):
     global model
     loading_message = "Loading model..."
     print(loading_message, end="", flush=True, file=sys.stderr)
     model = Llama(
         model_path,
-        n_gpu_layers=-1,
+        n_gpu_layers=n_gpu_layers,
         verbose=False,
         use_mlock=True,
         n_ctx=0,
@@ -259,6 +259,7 @@ def main():
     )
 
     parser.add_argument("model_path", help="path to a .gguf model file")
+    parser.add_argument("--n_gpu_layers", type=int, default=-1, help="number of GPU layers to use (default: -1)")
 
     parser.add_argument(
         "-w",
@@ -294,7 +295,7 @@ def main():
 
     args = parser.parse_args()
 
-    load_model(args.model_path)
+    load_model(args.model_path, args.n_gpu_layers)
 
     try:
         if args.overlap.endswith("%"):

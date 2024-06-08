@@ -263,9 +263,9 @@ def main():
     parser.add_argument(
         "-w",
         "--window-overlap",
-        type=int,
-        default=0,
-        help="number of tokens to overlap between windows when input exceeds model context size (default: 0)",
+        dest="overlap",
+        default="0%",
+        help="how much context (as number of tokens or percent of window) to maintain after reaching the model's context limit (default: 0%%)",
     )
 
     mode_group = parser.add_mutually_exclusive_group(required=True)
@@ -296,15 +296,23 @@ def main():
 
     load_model(args.model_path)
 
-    window_overlap = (
-        args.window_overlap
-        if args.window_overlap >= 0
-        else args.window_overlap + model.n_ctx()
-    )
-
-    if not (0 <= window_overlap < model.n_ctx()):
+    try:
+        if args.overlap.endswith("%"):
+            percent = float(args.overlap[:-1])
+            if not (0 <= percent <= 100):
+                parser.error("window overlap must be in the range [0%, 100%]")
+            window_overlap = int(percent / 100 * (model.n_ctx() - 1))
+        else:
+            window_overlap = int(args.overlap)
+            if window_overlap < 0:
+                window_overlap += model.n_ctx()
+            if not (0 <= window_overlap < model.n_ctx()):
+                parser.error(
+                    f"window overlap must be in the range [{-model.n_ctx()}, {model.n_ctx() - 1}]"
+                )
+    except ValueError:
         parser.error(
-            f"Window overlap must be in the range [{-model.n_ctx()}, {model.n_ctx() - 1}]"
+            f"window overlap must be an integer (number of tokens) or a percentage (of the model's context length)"
         )
 
     try:
@@ -316,7 +324,7 @@ def main():
                 args.compressed[0] if args.compressed else sys.stdin.read().strip()
             )
             if not all(char in BASE64 for char in compressed):
-                parser.error("Invalid compressed string")
+                parser.error("invalid compressed string")
             decompress(compressed, window_overlap)
         elif args.interactive:
             while True:

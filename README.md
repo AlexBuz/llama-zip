@@ -37,6 +37,8 @@ llama-zip <llm_path> [options] <mode> [input]
 
 ### Examples
 
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/drive/1piHwN-9imkyQkXoX4NMrf8-WeebeZKgj?usp=sharing)
+
 #### Compression
 - Compressing a string:
     ```sh

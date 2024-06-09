@@ -255,7 +255,7 @@ def main():
 
     parser.add_argument("model_path", help="path to a .gguf model file")
     parser.add_argument(
-        "--n_gpu_layers",
+        "--n-gpu-layers",
         type=int,
         default=-1,
         help="number of model layers to offload to GPU. -1 for all layers (default: -1)",

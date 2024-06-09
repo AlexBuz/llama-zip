@@ -8,19 +8,19 @@
 
 In the table below, the compression ratios achieved by `llama-zip` on the text files of the [Calgary Corpus](http://www.data-compression.info/Corpora/CalgaryCorpus/) (as well as on `llama-zip`'s own source code) are compared to other popular or high-performance compression utilities. Compression ratios are calculated by dividing the number of bytes in the input by the number of bytes in the output, so higher values indicate better compression. For `llama-zip`, the LLM used was [Llama 3 8B (Q4_K_M)](https://huggingface.co/QuantFactory/Meta-Llama-3-8B-GGUF) with a window overlap of 25%. For the other utilities, the maximum compression level was used.
 
-| File         |    llama-zip | bzip2 |      paq8pxd |    xz |         zpaq |  zstd |
-| :----------- | -----------: | ----: | -----------: | ----: | -----------: | ----: |
-| bib          |    **8.523** | 4.051 | <u>5.590</u> | 3.636 |        4.611 | 3.485 |
-| book1        |    **6.943** | 3.305 | <u>4.204</u> | 2.941 |        3.823 | 2.904 |
-| book2        |    **8.127** | 3.880 | <u>5.325</u> | 3.596 |        4.649 | 3.514 |
-| news         |    **5.590** | 3.180 | <u>4.494</u> | 3.171 |        3.817 | 3.073 |
-| paper1       |    **7.637** | 3.211 | <u>4.212</u> | 3.074 |        3.572 | 3.017 |
-| paper2       |    **8.375** | 3.283 | <u>4.135</u> | 3.015 |        3.679 | 2.982 |
-| progc        |    **4.425** | 3.158 | <u>4.352</u> | 3.151 |        3.495 | 3.096 |
-| progl        |        5.194 | 4.599 |    **7.347** | 4.787 | <u>5.554</u> | 4.728 |
-| progp        | <u>6.309</u> | 4.611 |    **7.508** | 4.772 |        5.348 | 4.724 |
-| trans        |    **9.810** | 5.235 | <u>8.409</u> | 5.613 |        6.597 | 5.417 |
-| llama_zip.py |    **5.859** | 3.508 | <u>4.689</u> | 3.552 |        3.018 | 3.633 |
+| File         |        llama-zip | bzip2 |          paq8pxd |    xz |             zpaq |  zstd |
+| :----------- | ---------------: | ----: | ---------------: | ----: | ---------------: | ----: |
+| bib          |        **8.523** | 4.051 | <ins>5.590</ins> | 3.636 |            4.611 | 3.485 |
+| book1        |        **6.943** | 3.305 | <ins>4.204</ins> | 2.941 |            3.823 | 2.904 |
+| book2        |        **8.127** | 3.880 | <ins>5.325</ins> | 3.596 |            4.649 | 3.514 |
+| news         |        **5.590** | 3.180 | <ins>4.494</ins> | 3.171 |            3.817 | 3.073 |
+| paper1       |        **7.637** | 3.211 | <ins>4.212</ins> | 3.074 |            3.572 | 3.017 |
+| paper2       |        **8.375** | 3.283 | <ins>4.135</ins> | 3.015 |            3.679 | 2.982 |
+| progc        |        **4.425** | 3.158 | <ins>4.352</ins> | 3.151 |            3.495 | 3.096 |
+| progl        |            5.194 | 4.599 |        **7.347** | 4.787 | <ins>5.554</ins> | 4.728 |
+| progp        | <ins>6.309</ins> | 4.611 |        **7.508** | 4.772 |            5.348 | 4.724 |
+| trans        |        **9.810** | 5.235 | <ins>8.409</ins> | 5.613 |            6.597 | 5.417 |
+| llama_zip.py |        **5.859** | 3.508 | <ins>4.689</ins> | 3.552 |            3.018 | 3.633 |
 
 The best-performing compressor for each file is listed in bold, and the second-best is underlined.
 

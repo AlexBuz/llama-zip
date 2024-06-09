@@ -120,7 +120,7 @@ def compute_cdf(logits):
     return cum_freqs
 
 
-def compress(string, window_overlap):
+def compress(uncompressed, window_overlap):
     def bits_to_base64(bits):
         while bits and bits[-1] == 0:
             bits.pop()
@@ -155,7 +155,7 @@ def compress(string, window_overlap):
         )
 
     model.reset()
-    tokens = model.tokenize(string.encode("utf-8"), add_bos=False)
+    tokens = model.tokenize(uncompressed.encode("utf-8"), add_bos=False)
     tokens.append(model.token_eos())
     next_token_idx = 0
     encoder = Encoder()
@@ -204,12 +204,8 @@ def decompress(compressed, window_overlap):
         if next_token == model.token_eos():
             return logits
         tokens.append(next_token)
-        output_buf.extend(model.detokenize([next_token]))
-        try:
-            print(output_buf.decode("utf-8"), end="", flush=True)
-            output_buf.clear()
-        except UnicodeDecodeError:
-            pass
+        sys.stdout.buffer.write(model.detokenize([next_token]))
+        sys.stdout.buffer.flush()
         return logits
 
     def should_stop(tokens_so_far, logits):
@@ -222,7 +218,6 @@ def decompress(compressed, window_overlap):
     tokens = []
     encoded = base64_to_bits(compressed)
     decoder = Decoder(encoded)
-    output_buf = bytearray()
     done = False
     while not done:
         overlap_start_idx = max(0, len(tokens) - window_overlap)
@@ -259,7 +254,12 @@ def main():
     )
 
     parser.add_argument("model_path", help="path to a .gguf model file")
-    parser.add_argument("--n_gpu_layers", type=int, default=-1, help="number of GPU layers to use (default: -1)")
+    parser.add_argument(
+        "--n_gpu_layers",
+        type=int,
+        default=-1,
+        help="number of model layers to offload to GPU. -1 for all layers (default: -1)",
+    )
 
     parser.add_argument(
         "-w",
@@ -275,14 +275,14 @@ def main():
         "--compress",
         dest="string",
         nargs="*",
-        help="comppress input string or stdin",
+        help="compress argument string (or stdin if no argument is provided)",
     )
     mode_group.add_argument(
         "-d",
         "--decompress",
         dest="compressed",
         nargs="*",
-        help="decompress input string or stdin",
+        help="decompress argument string (or stdin if no argument is provided)",
     )
     mode_group.add_argument(
         "-i",
@@ -318,8 +318,8 @@ def main():
 
     try:
         if args.string is not None:
-            string = " ".join(args.string) if args.string else sys.stdin.read()
-            compress(string, window_overlap)
+            uncompressed = " ".join(args.string) if args.string else sys.stdin.read()
+            compress(uncompressed, window_overlap)
         elif args.compressed is not None:
             compressed = (
                 args.compressed[0] if args.compressed else sys.stdin.read().strip()
@@ -329,8 +329,7 @@ def main():
             decompress(compressed, window_overlap)
         elif args.interactive:
             while True:
-                print("≥≥≥", end=" ", flush=True, file=sys.stderr)
-                string = input()
+                string = input("≥≥≥ ")
                 if string and all(char in BASE64 for char in string):
                     try:
                         decompress(string, window_overlap)

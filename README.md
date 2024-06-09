@@ -4,6 +4,24 @@
 
 ![Interactive Mode Demo: Lorem Ipsum Text](lorem_ipsum_demo.gif)
 
+## Compression Ratio
+
+The compression ratio that `llama-zip` can achieve on a particular input depends on which LLM is used as well as the window overlap parameter (which determines how much of the context window is retained when sliding). The following table shows some compression ratios that `llama-zip` can achieve when using the [Llama 3 8B (Q4_K_M)](https://huggingface.co/QuantFactory/Meta-Llama-3-8B-GGUF) model with a window overlap of 25%. The files tested include all the text files from the standard [Calgary Corpus](http://www.data-compression.info/Corpora/CalgaryCorpus/), as well as `llama-zip`'s own source code. The compression ratios are calculated as the ratio of the original file size to the compressed file size, so higher values indicate better compression.
+
+| File         | Ratio |
+| ------------ | ----- |
+| bib          | 8.523 |
+| book1        | 6.943 |
+| book2        | 8.127 |
+| news         | 5.590 |
+| paper1       | 7.637 |
+| paper2       | 8.375 |
+| progc        | 4.425 |
+| progl        | 5.194 |
+| progp        | 6.309 |
+| trans        | 9.810 |
+| llama_zip.py | 5.859 |
+
 ## Setup
 
 ```sh

@@ -185,7 +185,7 @@ def compress(string, window_overlap):
 
     encoder.finish()
     compressed = bits_to_base64(encoder.get_encoded())
-    print(compressed)
+    print(compressed, end="", flush=True)
 
     signal.signal(signal.SIGINT, s)
 
@@ -336,10 +336,9 @@ def main():
                         decompress(string, window_overlap)
                     except KeyboardInterrupt:
                         pass
-                    print(file=sys.stderr)
                 else:
                     compress(string, window_overlap)
-                print(file=sys.stderr)
+                print("\n", file=sys.stderr)
     except KeyboardInterrupt:
         print(file=sys.stderr)
 

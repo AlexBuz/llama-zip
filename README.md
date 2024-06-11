@@ -54,7 +54,7 @@ llama-zip <llm_path> [options] <mode> [input]
 ### Options
 
 - `-w`, `--window-overlap`: The number of tokens to overlap between the end of the previous context window and the start of the next window, when compressing a string whose length exceeds the LLM's maximum context length. This can be specified as a percentage of the LLM's context length or as a fixed number of tokens. The default is `0%`, meaning that the context window is cleared entirely when it is filled. Higher values can improve compression ratios but will slow down compression and decompression, since parts of the text will need to be re-evaluated when the context window slides. Note that when decompressing, the window overlap must be set to the same value that was used during compression in order to recover the original text.
-- `--n_gpu_layers`: The `--n_gpu_layers` argument in the code specifies the number of layers in the model that should be offloaded to the GPU for computation. This can significantly speed up the processing time, especially for larger models, as the GPU is typically much faster at performing matrix operations than a CPU. If `--n_gpu_layers` is set to -1 or None, all layers of the model will be offloaded to the GPU. Check [llama.cpp's](https://github.com/ggerganov/llama.cpp) readme for better understanding of this parameter.
+- `--n-gpu-layers`: The number of LLM layers to offload to the GPU. This can significantly speed up compression and decompression, especially for larger models. If set to `-1` (the default), then all layers will be offloaded. See the [llama.cpp repository](https://github.com/ggerganov/llama.cpp) for more information.
 
 ### Examples
 

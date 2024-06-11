@@ -241,16 +241,16 @@ def decompress(compressed, window_overlap):
     return decompressed.decode("utf-8")
 
 
-def load_model(model_path, n_gpu_layers):
+def load_model(args):
     global model
     loading_message = "Loading model..."
     print(loading_message, end="", flush=True, file=sys.stderr)
     model = Llama(
-        model_path,
-        n_gpu_layers=n_gpu_layers,
+        model_path=args.model_path,
+        use_mlock=args.use_mlock,
+        n_ctx=args.n_ctx,
+        n_gpu_layers=args.n_gpu_layers,
         verbose=False,
-        use_mlock=True,
-        n_ctx=0,
     )
     print("\r" + " " * len(loading_message) + "\r", end="", flush=True, file=sys.stderr)
     return model
@@ -262,11 +262,26 @@ def main():
     )
 
     parser.add_argument("model_path", help="path to a .gguf model file")
+
+    parser.add_argument(
+        "--use-mlock",
+        default=False,
+        action="store_true",
+        help="force the system to keep the model in RAM (disabled by default)",
+    )
+
     parser.add_argument(
         "--n-gpu-layers",
         type=int,
         default=-1,
-        help="number of model layers to offload to GPU. -1 for all layers (default: -1)",
+        help="number of model layers to offload to GPU (default: -1, which offloads all layers)",
+    )
+
+    parser.add_argument(
+        "--n-ctx",
+        type=int,
+        default=0,
+        help="model context length (default: 0, which uses maximum supported by the model)",
     )
 
     parser.add_argument(
@@ -274,7 +289,7 @@ def main():
         "--window-overlap",
         dest="overlap",
         default="0%",
-        help="how much context (as number of tokens or percent of window) to maintain after reaching the model's context limit (default: 0%%)",
+        help="how much model context (as number of tokens or percentage of model context length) to maintain after filling the window. higher values increase compression ratio but decrease speed. must use same value for compression and decompression (default: 0%%)",
     )
 
     mode_group = parser.add_mutually_exclusive_group(required=True)
@@ -303,7 +318,7 @@ def main():
 
     args = parser.parse_args()
 
-    load_model(args.model_path, args.n_gpu_layers)
+    load_model(args)
 
     try:
         if args.overlap.endswith("%"):

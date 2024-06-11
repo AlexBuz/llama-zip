@@ -203,8 +203,16 @@ def decompress(compressed, window_overlap):
         logits[next_token] = np.inf
         if next_token == model.token_eos():
             return logits
+        detokenized = model.detokenize([next_token])
+        if (
+            len(tokens) == 0
+            and model.detokenize(model.tokenize(detokenized, add_bos=False))
+            == b" " + detokenized
+        ):
+            detokenized = detokenized[1:]
         tokens.append(next_token)
-        sys.stdout.buffer.write(model.detokenize([next_token]))
+        decompressed.extend(detokenized)
+        sys.stdout.buffer.write(detokenized)
         sys.stdout.buffer.flush()
         return logits
 
@@ -216,21 +224,21 @@ def decompress(compressed, window_overlap):
 
     model.reset()
     tokens = []
+    decompressed = bytearray()
     encoded = base64_to_bits(compressed)
     decoder = Decoder(encoded)
     done = False
     while not done:
-        overlap_start_idx = max(0, len(tokens) - window_overlap)
+        start_idx = max(0, len(tokens) - window_overlap)
         consume(
             model.generate(
-                tokens=[model.token_bos()] + tokens[overlap_start_idx:],
+                tokens=[model.token_bos()] + tokens[start_idx:],
                 temp=0.0,
                 logits_processor=process_logits,
                 stopping_criteria=should_stop,
             )
         )
-    decompressed = model.detokenize(tokens).decode("utf-8")
-    return decompressed
+    return decompressed.decode("utf-8")
 
 
 def load_model(model_path, n_gpu_layers):

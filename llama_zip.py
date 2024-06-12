@@ -361,6 +361,8 @@ def main():
                 else:
                     compress(string, window_overlap)
                 print("\n", file=sys.stderr)
+    except UnicodeDecodeError:
+        parser.error("input must be valid UTF-8-encoded text")
     except KeyboardInterrupt:
         print(file=sys.stderr)
 

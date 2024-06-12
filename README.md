@@ -38,8 +38,25 @@ To use `llama-zip`, you must first download an LLM that is compatible with [llam
 
 ## Usage
 
+### Option 1 (from CLI):
 ```
 llama-zip <llm_path> [options] <mode> [input]
+```
+
+### Option 2 (from Python):
+```python
+from llama_zip import LLMCompressor
+
+# Initialize the compressor
+compressor = LLMCompressor(model_path='/path/to/your/model.gguf', verbose=False)
+
+# Compress a string
+compressed_data = compressor.compress("This is the string to compress, let's see how good this works!", window_overlap=10)
+
+# Decompress the string
+decompressed_data = compressor.decompress(compressed_data, window_overlap=10)
+
+print("Decompressed data:", decompressed_data)
 ```
 
 ### Modes

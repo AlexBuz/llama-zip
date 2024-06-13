@@ -136,7 +136,7 @@ class LlamaZip:
         cum_freqs = np.cumsum(freqs)
         return cum_freqs
 
-    def compress(self, uncompressed, window_overlap):
+    def compress(self, uncompressed, window_overlap=0):
         def bits_to_base64(bits):
             while bits and bits[-1] == 0:
                 bits.pop()
@@ -211,7 +211,7 @@ class LlamaZip:
 
         return compressed
 
-    def decompress(self, compressed, window_overlap):
+    def decompress(self, compressed, window_overlap=0):
         def base64_to_bits(string):
             bits = [int(bit) for char in string for bit in f"{BASE64.index(char):06b}"]
             return bits

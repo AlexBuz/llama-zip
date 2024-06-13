@@ -105,20 +105,25 @@ class Decoder(ArithmeticCoderBase):
 
 class LlamaZip:
     def __init__(
-        self, model_path, use_mlock=False, n_ctx=0, n_gpu_layers=-1, verbose=False
+        self, model_path, n_ctx=0, n_gpu_layers=-1, use_mlock=False, verbose=False
     ):
         self.verbose = verbose
-        self.load_model(model_path, use_mlock, n_ctx, n_gpu_layers)
+        self.load_model(
+            model_path=model_path,
+            n_ctx=n_ctx,
+            n_gpu_layers=n_gpu_layers,
+            use_mlock=use_mlock,
+        )
 
-    def load_model(self, model_path, use_mlock, n_ctx, n_gpu_layers):
+    def load_model(self, model_path, n_ctx, n_gpu_layers, use_mlock):
         loading_message = "Loading model..."
         if self.verbose:
             print(loading_message, end="", flush=True, file=sys.stderr)
         self.model = Llama(
             model_path=model_path,
             use_mlock=use_mlock,
-            n_ctx=n_ctx,
             n_gpu_layers=n_gpu_layers,
+            n_ctx=n_ctx,
             verbose=False,
         )
         if self.verbose:
@@ -273,16 +278,11 @@ def make_arg_parser():
     )
     parser.add_argument("model_path", help="path to model file")
     parser.add_argument(
-        "--use-mlock",
-        default=False,
-        action="store_true",
-        help="use mlock to keep model in RAM (disabled by default)",
-    )
-    parser.add_argument(
-        "--n-gpu-layers",
-        type=int,
-        default=-1,
-        help="number of model layers to offload to GPU (default: -1, which offloads all layers)",
+        "-w",
+        "--window-overlap",
+        dest="overlap",
+        default="0%",
+        help="how much model context (as number of tokens or percentage of model context length) to maintain after filling the window. higher values increase compression ratio but decrease speed. must use same value for compression and decompression (default: 0%%)",
     )
     parser.add_argument(
         "--n-ctx",
@@ -291,11 +291,16 @@ def make_arg_parser():
         help="model context length (default: 0, which uses maximum supported by the model)",
     )
     parser.add_argument(
-        "-w",
-        "--window-overlap",
-        dest="overlap",
-        default="0%",
-        help="how much model context (as number of tokens or percentage of model context length) to maintain after filling the window. higher values increase compression ratio but decrease speed. must use same value for compression and decompression (default: 0%%)",
+        "--n-gpu-layers",
+        type=int,
+        default=-1,
+        help="number of model layers to offload to GPU (default: -1, which offloads all layers)",
+    )
+    parser.add_argument(
+        "--use-mlock",
+        default=False,
+        action="store_true",
+        help="use mlock to keep model in RAM (disabled by default)",
     )
     mode_group = parser.add_mutually_exclusive_group(required=True)
     mode_group.add_argument(

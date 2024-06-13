@@ -24,7 +24,7 @@ In the table below, the compression ratios achieved by `llama-zip` on the text f
 
 The best-performing compressor for each file is listed in bold, and the second-best is underlined. The columns are sorted by average compression ratio achieved across all files, with overall better-performing compressors listed further to the left.
 
-## Setup
+## Installation
 
 ```sh
 git clone https://github.com/alexbuz/llama-zip.git
@@ -36,27 +36,10 @@ pip3 install .
 
 To use `llama-zip`, you must first download an LLM that is compatible with [llama.cpp](https://github.com/ggerganov/llama.cpp), such as [Llama 3 8B](https://huggingface.co/QuantFactory/Meta-Llama-3-8B-GGUF). Make sure to download a quantized version (one of the `.gguf` files listed on the "Files and versions" tab on Hugging Face) that is small enough to fit in your system's memory.
 
-## Usage
+## CLI Usage
 
-### Option 1 (from CLI):
 ```
 llama-zip <llm_path> [options] <mode> [input]
-```
-
-### Option 2 (from Python):
-```python
-from llama_zip import LLMCompressor
-
-# Initialize the compressor
-compressor = LLMCompressor(model_path='/path/to/your/model.gguf', verbose=False)
-
-# Compress a string
-compressed_data = compressor.compress("This is the string to compress, let's see how good this works!", window_overlap=10)
-
-# Decompress the string
-decompressed_data = compressor.decompress(compressed_data, window_overlap=10)
-
-print("Decompressed data:", decompressed_data)
 ```
 
 ### Modes
@@ -112,3 +95,22 @@ print("Decompressed data:", decompressed_data)
     ```sh
     llama-zip /path/to/Meta-Llama-3-8B.Q8_0.gguf -d < /path/to/input.compressed > /path/to/output.txt
     ```
+
+## API Usage
+
+The `LlamaZip` class can be used to compress and decompress strings programmatically. The `compress` method takes a string as input and returns the compressed output as a base64-encoded string. The `decompress` method takes a compressed base64-encoded string as input and returns the decompressed string. Here is an example:
+
+```python
+from llama_zip import LlamaZip
+
+# Initialize the compressor and load an LLM
+compressor = LlamaZip(model_path="/path/to/model.gguf")
+
+# Compress a string
+string = "The quick brown fox jumps over the lazy dog."
+compressed_base64 = compressor.compress(string)
+
+# Reconstruct the original string
+decompressed_string = compressor.decompress(compressed_base64)
+assert string == decompressed_string
+```

@@ -211,6 +211,12 @@ class LlamaZip:
 
         return compressed
 
+    def tokenizer_adds_space_prefix(self):
+        space = b" "
+        double_space = b"  "
+        tokenized = self.model.tokenize(space, add_bos=False)
+        return self.model.detokenize(tokenized) == double_space
+
     def decompress(self, compressed, window_overlap=0):
         def base64_to_bits(string):
             bits = [int(bit) for char in string for bit in f"{BASE64.index(char):06b}"]
@@ -225,10 +231,8 @@ class LlamaZip:
             detokenized = self.model.detokenize([next_token])
             if (
                 len(tokens) == 0
-                and self.model.detokenize(
-                    self.model.tokenize(detokenized, add_bos=False)
-                )
-                == b" " + detokenized
+                and detokenized.startswith(b" ")
+                and self.tokenizer_adds_space_prefix()
             ):
                 detokenized = detokenized[1:]
             tokens.append(next_token)

@@ -9,9 +9,11 @@ from llama_cpp import Llama
 from more_itertools import consume
 from tqdm import tqdm
 
+
 NUM_STATE_BITS = 64
 FREQ_SCALE_FACTOR = 1 << 32
 BASE64 = string.ascii_uppercase + string.ascii_lowercase + string.digits + "+/"
+
 
 class ArithmeticCoderBase:
     def __init__(self):
@@ -44,6 +46,7 @@ class ArithmeticCoderBase:
     def underflow(self):
         raise NotImplementedError()
 
+
 class Encoder(ArithmeticCoderBase):
     def __init__(self):
         super().__init__()
@@ -68,11 +71,14 @@ class Encoder(ArithmeticCoderBase):
     def underflow(self):
         self.num_underflow += 1
 
+
 class Decoder(ArithmeticCoderBase):
     def __init__(self, encoded_data: list):
         super().__init__()
         self.input = deque(encoded_data)
-        self.code = sum(self.read_code_bit() << i for i in range(NUM_STATE_BITS - 1, -1, -1))
+        self.code = sum(
+            self.read_code_bit() << i for i in range(NUM_STATE_BITS - 1, -1, -1)
+        )
 
     def decode_symbol(self, cum_freqs):
         total = int(cum_freqs[-1])
@@ -87,20 +93,28 @@ class Decoder(ArithmeticCoderBase):
         self.code = ((self.code << 1) & self.state_mask) | self.read_code_bit()
 
     def underflow(self):
-        self.code = ((self.code & self.half_range) | ((self.code << 1) & (self.state_mask >> 1)) | self.read_code_bit())
+        self.code = (
+            (self.code & self.half_range)
+            | ((self.code << 1) & (self.state_mask >> 1))
+            | self.read_code_bit()
+        )
 
     def read_code_bit(self):
         return self.input.popleft() if len(self.input) else 0
 
-class LLMCompressor:
-    def __init__(self, model_path, use_mlock=False, n_ctx=0, n_gpu_layers=-1, verbose=False):
+
+class LlamaZip:
+    def __init__(
+        self, model_path, use_mlock=False, n_ctx=0, n_gpu_layers=-1, verbose=False
+    ):
         self.verbose = verbose
-        self.model = self.load_model(model_path, use_mlock, n_ctx, n_gpu_layers)
+        self.load_model(model_path, use_mlock, n_ctx, n_gpu_layers)
 
     def load_model(self, model_path, use_mlock, n_ctx, n_gpu_layers):
+        loading_message = "Loading model..."
         if self.verbose:
-            print("Loading model...", end="", flush=True, file=sys.stderr)
-        model = Llama(
+            print(loading_message, end="", flush=True, file=sys.stderr)
+        self.model = Llama(
             model_path=model_path,
             use_mlock=use_mlock,
             n_ctx=n_ctx,
@@ -108,8 +122,12 @@ class LLMCompressor:
             verbose=False,
         )
         if self.verbose:
-            print("\r" + " " * 15 + "\r", end="", flush=True, file=sys.stderr)
-        return model
+            print(
+                "\r" + " " * len(loading_message) + "\r",
+                end="",
+                flush=True,
+                file=sys.stderr,
+            )
 
     def compute_cdf(self, logits):
         logprobs = self.model.logits_to_logprobs(logits)
@@ -124,7 +142,10 @@ class LLMCompressor:
                 bits.pop()
             while len(bits) % 6 != 0:
                 bits.append(0)
-            return "".join(BASE64[int("".join(str(bit) for bit in bits[i : i + 6]), 2)] for i in range(0, len(bits), 6))
+            return "".join(
+                BASE64[int("".join(str(bit) for bit in bits[i : i + 6]), 2)]
+                for i in range(0, len(bits), 6)
+            )
 
         def sigint_handler(*_):
             nonlocal interrupted
@@ -145,7 +166,10 @@ class LLMCompressor:
             return logits
 
         def should_stop(tokens_so_far, logits):
-            return (np.argmax(logits) == self.model.token_eos() or len(tokens_so_far) == self.model.n_ctx())
+            return (
+                np.argmax(logits) == self.model.token_eos()
+                or len(tokens_so_far) == self.model.n_ctx()
+            )
 
         self.model.reset()
         tokens = self.model.tokenize(uncompressed.encode("utf-8"), add_bos=False)
@@ -156,25 +180,15 @@ class LLMCompressor:
         interrupted = False
         s = signal.signal(signal.SIGINT, sigint_handler)
 
-        if self.verbose:
-            progress_bar = tqdm(
-                total=len(tokens),
-                mininterval=1 / 30,
-                desc="Compressing",
-                unit="tok",
-                leave=False,
-                dynamic_ncols=True,
-            )
-        else:
-            progress_bar = tqdm(
-                total=len(tokens),
-                mininterval=1 / 30,
-                desc="Compressing",
-                unit="tok",
-                leave=False,
-                dynamic_ncols=True,
-                disable=True,
-            )
+        progress_bar = tqdm(
+            total=len(tokens),
+            mininterval=1 / 30,
+            desc="Compressing",
+            unit="tok",
+            leave=False,
+            dynamic_ncols=True,
+            disable=not self.verbose,
+        )
 
         while next_token_idx < len(tokens):
             start_idx = max(0, next_token_idx - window_overlap)
@@ -209,7 +223,13 @@ class LLMCompressor:
             if next_token == self.model.token_eos():
                 return logits
             detokenized = self.model.detokenize([next_token])
-            if (len(tokens) == 0 and self.model.detokenize(self.model.tokenize(detokenized, add_bos=False)) == b" " + detokenized):
+            if (
+                len(tokens) == 0
+                and self.model.detokenize(
+                    self.model.tokenize(detokenized, add_bos=False)
+                )
+                == b" " + detokenized
+            ):
                 detokenized = detokenized[1:]
             tokens.append(next_token)
             decompressed.extend(detokenized)
@@ -240,52 +260,106 @@ class LLMCompressor:
                     stopping_criteria=should_stop,
                 )
             )
-        if self.verbose:
-            print(file=sys.stderr)
-        return decompressed.decode("utf-8", errors="ignore")
+        return decompressed.decode("utf-8")
 
-def parse_arguments():
-    parser = argparse.ArgumentParser(description="Compress and decompress text using a large language model")
+
+def make_arg_parser():
+    parser = argparse.ArgumentParser(
+        description="Compress and decompress text using a large language model"
+    )
     parser.add_argument("model_path", help="path to model file")
-    parser.add_argument("--use-mlock", default=False, action="store_true", help="use mlock to keep model in RAM (disabled by default)")
-    parser.add_argument("--n-gpu-layers", type=int, default=-1, help="number of model layers to offload to GPU (default: -1, which offloads all layers)")
-    parser.add_argument("--n-ctx", type=int, default=0, help="model context length (default: 0, which uses maximum supported by the model)")
-    parser.add_argument("-w", "--window-overlap", dest="overlap", default="0%", help="how much model context (as number of tokens or percentage of model context length) to maintain after filling the window. higher values increase compression ratio but decrease speed. must use same value for compression and decompression (default: 0%%)")
+    parser.add_argument(
+        "--use-mlock",
+        default=False,
+        action="store_true",
+        help="use mlock to keep model in RAM (disabled by default)",
+    )
+    parser.add_argument(
+        "--n-gpu-layers",
+        type=int,
+        default=-1,
+        help="number of model layers to offload to GPU (default: -1, which offloads all layers)",
+    )
+    parser.add_argument(
+        "--n-ctx",
+        type=int,
+        default=0,
+        help="model context length (default: 0, which uses maximum supported by the model)",
+    )
+    parser.add_argument(
+        "-w",
+        "--window-overlap",
+        dest="overlap",
+        default="0%",
+        help="how much model context (as number of tokens or percentage of model context length) to maintain after filling the window. higher values increase compression ratio but decrease speed. must use same value for compression and decompression (default: 0%%)",
+    )
     mode_group = parser.add_mutually_exclusive_group(required=True)
-    mode_group.add_argument("-c", "--compress", dest="string", nargs="*", help="compress argument string (or stdin if no argument is provided)")
-    mode_group.add_argument("-d", "--decompress", dest="compressed", nargs="*", help="decompress argument string (or stdin if no argument is provided)")
-    mode_group.add_argument("-i", "--interactive", dest="interactive", default=False, action="store_true", help="show a prompt for interactive compression and decompression")
-    return parser.parse_args()
+    mode_group.add_argument(
+        "-c",
+        "--compress",
+        dest="string",
+        nargs="*",
+        help="compress argument string (or stdin if no argument is provided)",
+    )
+    mode_group.add_argument(
+        "-d",
+        "--decompress",
+        dest="compressed",
+        nargs="*",
+        help="decompress argument string (or stdin if no argument is provided)",
+    )
+    mode_group.add_argument(
+        "-i",
+        "--interactive",
+        dest="interactive",
+        default=False,
+        action="store_true",
+        help="show a prompt for interactive compression and decompression",
+    )
+    return parser
+
 
 def main():
-    args = parse_arguments()
-    compressor = LLMCompressor(model_path=args.model_path, use_mlock=args.use_mlock, n_ctx=args.n_ctx, n_gpu_layers=args.n_gpu_layers, verbose=True)
+    parser = make_arg_parser()
+    args = parser.parse_args()
+
+    compressor = LlamaZip(
+        model_path=args.model_path,
+        use_mlock=args.use_mlock,
+        n_ctx=args.n_ctx,
+        n_gpu_layers=args.n_gpu_layers,
+        verbose=True,
+    )
 
     try:
         if args.overlap.endswith("%"):
             percent = float(args.overlap[:-1])
             if not (0 <= percent <= 100):
-                raise ValueError("window overlap must be in the range [0%, 100%]")
+                parser.error("window overlap must be in the range [0%, 100%]")
             window_overlap = int(percent / 100 * (compressor.model.n_ctx() - 1))
         else:
             window_overlap = int(args.overlap)
             if window_overlap < 0:
                 window_overlap += compressor.model.n_ctx()
             if not (0 <= window_overlap < compressor.model.n_ctx()):
-                raise ValueError(f"window overlap must be in the range [{-compressor.model.n_ctx()}, {compressor.model.n_ctx() - 1}]")
-    except ValueError as e:
-        print(e, file=sys.stderr)
-        return
+                parser.error(
+                    f"window overlap must be in the range [{-compressor.model.n_ctx()}, {compressor.model.n_ctx() - 1}]"
+                )
+    except ValueError:
+        parser.error(
+            "window overlap must be an integer (number of tokens) or a percentage (of the model's context length)"
+        )
 
     try:
         if args.string is not None:
             uncompressed = " ".join(args.string) if args.string else sys.stdin.read()
             compressor.compress(uncompressed, window_overlap)
         elif args.compressed is not None:
-            compressed = args.compressed[0] if args.compressed else sys.stdin.read().strip()
+            compressed = (
+                args.compressed[0] if args.compressed else sys.stdin.read().strip()
+            )
             if not all(char in BASE64 for char in compressed):
-                print("invalid compressed string", file=sys.stderr)
-                return
+                parser.error("invalid compressed string")
             compressor.decompress(compressed, window_overlap)
         elif args.interactive:
             while True:
@@ -299,9 +373,10 @@ def main():
                     compressor.compress(string, window_overlap)
                 print("\n", file=sys.stderr)
     except UnicodeDecodeError:
-        print("input must be valid UTF-8-encoded text", file=sys.stderr)
+        parser.error("input must be valid UTF-8-encoded text")
     except KeyboardInterrupt:
         print(file=sys.stderr)
+
 
 if __name__ == "__main__":
     main()

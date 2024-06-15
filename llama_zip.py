@@ -1,6 +1,6 @@
 import argparse
+import codecs
 import signal
-import string
 import sys
 from collections import deque
 
@@ -12,7 +12,7 @@ from tqdm import tqdm
 
 NUM_STATE_BITS = 64
 FREQ_SCALE_FACTOR = 1 << 32
-BASE64 = string.ascii_uppercase + string.ascii_lowercase + string.digits + "+/"
+BASE64 = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
 
 
 class ArithmeticCoderBase:
@@ -73,9 +73,9 @@ class Encoder(ArithmeticCoderBase):
 
 
 class Decoder(ArithmeticCoderBase):
-    def __init__(self, encoded_data: list):
+    def __init__(self, encoded_bits):
         super().__init__()
-        self.input = deque(encoded_data)
+        self.input = deque(encoded_bits)
         self.code = sum(
             self.read_code_bit() << i for i in range(NUM_STATE_BITS - 1, -1, -1)
         )
@@ -101,6 +101,114 @@ class Decoder(ArithmeticCoderBase):
 
     def read_code_bit(self):
         return self.input.popleft() if len(self.input) else 0
+
+
+# Based on Rust's std::str::Utf8Chunks
+class Utf8Chunks:
+    def __init__(self, source):
+        self.source = source
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        if not self.source:
+            raise StopIteration
+
+        TAG_CONT_U8 = 128
+
+        def safe_get(xs, i):
+            try:
+                return xs[i]
+            except IndexError:
+                return 0
+
+        i = 0
+        valid_up_to = 0
+        while i < len(self.source):
+            byte = self.source[i]
+            i += 1
+
+            if byte < 0x80:
+                # ASCII
+                pass
+            elif 0xC2 <= byte <= 0xDF:
+                # 2-byte sequence
+                if safe_get(self.source, i) & 192 != TAG_CONT_U8:
+                    break
+                i += 1
+            elif 0xE0 <= byte <= 0xEF:
+                # 3-byte sequence
+                next_byte = safe_get(self.source, i)
+                if 0xE0 == byte and 0xA0 <= next_byte <= 0xBF:
+                    pass
+                elif 0xE1 <= byte <= 0xEC and 0x80 <= next_byte <= 0xBF:
+                    pass
+                elif 0xED == byte and 0x80 <= next_byte <= 0x9F:
+                    pass
+                elif 0xEE <= byte <= 0xEF and 0x80 <= next_byte <= 0xBF:
+                    pass
+                else:
+                    break
+                i += 1
+                if safe_get(self.source, i) & 192 != TAG_CONT_U8:
+                    break
+                i += 1
+            elif 0xF0 <= byte <= 0xF4:
+                # 4-byte sequence
+                next_byte = safe_get(self.source, i)
+                if 0xF0 == byte and 0x90 <= next_byte <= 0xBF:
+                    pass
+                elif 0xF1 <= byte <= 0xF3 and 0x80 <= next_byte <= 0xBF:
+                    pass
+                elif 0xF4 == byte and 0x80 <= next_byte <= 0x8F:
+                    pass
+                else:
+                    break
+                i += 1
+                if safe_get(self.source, i) & 192 != TAG_CONT_U8:
+                    break
+                i += 1
+                if safe_get(self.source, i) & 192 != TAG_CONT_U8:
+                    break
+                i += 1
+            else:
+                break
+
+            valid_up_to = i
+
+        inspected, remaining = self.source[:i], self.source[i:]
+        self.source = remaining
+
+        valid, invalid = inspected[:valid_up_to], inspected[valid_up_to:]
+        return valid, invalid
+
+
+PUA_START = 0xE000
+
+
+def bytes_to_utf8(data: bytes):
+    output = bytearray()
+    for valid, invalid in Utf8Chunks(data):
+        for char in valid.decode("utf-8"):
+            if PUA_START <= ord(char) <= PUA_START + 0xFF:
+                for byte in char.encode("utf-8"):
+                    output.extend(chr(PUA_START + byte).encode("utf-8"))
+            else:
+                output.extend(char.encode("utf-8"))
+        for byte in invalid:
+            output.extend(chr(PUA_START + byte).encode("utf-8"))
+    return bytes(output)
+
+
+def utf8_to_bytes(data: str):
+    output = bytearray()
+    for char in data:
+        if PUA_START <= ord(char) <= PUA_START + 0xFF:
+            output.append(ord(char) - PUA_START)
+        else:
+            output.extend(char.encode("utf-8"))
+    return bytes(output)
 
 
 class LlamaZip:
@@ -141,13 +249,13 @@ class LlamaZip:
         cum_freqs = np.cumsum(freqs)
         return cum_freqs
 
-    def compress(self, uncompressed, window_overlap=0):
+    def compress(self, uncompressed: bytes, window_overlap=0) -> bytes:
         def bits_to_base64(bits):
             while bits and bits[-1] == 0:
                 bits.pop()
             while len(bits) % 6 != 0:
                 bits.append(0)
-            return "".join(
+            return bytes(
                 BASE64[int("".join(str(bit) for bit in bits[i : i + 6]), 2)]
                 for i in range(0, len(bits), 6)
             )
@@ -165,7 +273,7 @@ class LlamaZip:
             next_token = tokens[next_token_idx]
             next_token_idx += 1
             cdf = self.compute_cdf(logits)
-            encoder.encode_symbol(cdf, next_token)
+            token_encoder.encode_symbol(cdf, next_token)
             progress_bar.update()
             logits[next_token] = np.inf
             return logits
@@ -177,10 +285,10 @@ class LlamaZip:
             )
 
         self.model.reset()
-        tokens = self.model.tokenize(uncompressed.encode("utf-8"), add_bos=False)
+        tokens = self.model.tokenize(bytes_to_utf8(uncompressed), add_bos=False)
         tokens.append(self.model.token_eos())
         next_token_idx = 0
-        encoder = Encoder()
+        token_encoder = Encoder()
 
         interrupted = False
         s = signal.signal(signal.SIGINT, sigint_handler)
@@ -207,10 +315,11 @@ class LlamaZip:
             )
         progress_bar.close()
 
-        encoder.finish()
-        compressed = bits_to_base64(encoder.get_encoded())
+        token_encoder.finish()
+        compressed = bits_to_base64(token_encoder.get_encoded())
         if self.verbose:
-            print(compressed, end="", flush=True)
+            sys.stdout.buffer.write(compressed)
+            sys.stdout.buffer.flush()
 
         signal.signal(signal.SIGINT, s)
 
@@ -222,28 +331,29 @@ class LlamaZip:
         tokenized = self.model.tokenize(space, add_bos=False)
         return self.model.detokenize(tokenized) == double_space
 
-    def decompress(self, compressed, window_overlap=0):
+    def decompress(self, compressed: bytes, window_overlap=0) -> bytes:
         def base64_to_bits(string):
             bits = [int(bit) for char in string for bit in f"{BASE64.index(char):06b}"]
             return bits
 
         def process_logits(_, logits):
             cdf = self.compute_cdf(logits)
-            next_token = decoder.decode_symbol(cdf)
+            next_token = token_decoder.decode_symbol(cdf)
             logits[next_token] = np.inf
             if next_token == self.model.token_eos():
                 return logits
-            detokenized = self.model.detokenize([next_token])
+            next_utf8 = self.model.detokenize([next_token])
             if (
-                len(tokens) == 0
-                and detokenized.startswith(b" ")
+                len(seen_tokens) == 0
+                and next_utf8.startswith(b" ")
                 and self.tokenizer_adds_space_prefix()
             ):
-                detokenized = detokenized[1:]
-            tokens.append(next_token)
-            decompressed.extend(detokenized)
+                next_utf8 = next_utf8[1:]
+            seen_tokens.append(next_token)
+            next_bytes = utf8_to_bytes(utf8_decoder.decode(next_utf8))
+            decompressed.extend(next_bytes)
             if self.verbose:
-                sys.stdout.buffer.write(detokenized)
+                sys.stdout.buffer.write(next_bytes)
                 sys.stdout.buffer.flush()
             return logits
 
@@ -254,27 +364,27 @@ class LlamaZip:
             return done or len(tokens_so_far) == self.model.n_ctx()
 
         self.model.reset()
-        tokens = []
+        seen_tokens = []
         decompressed = bytearray()
-        encoded = base64_to_bits(compressed)
-        decoder = Decoder(encoded)
+        token_decoder = Decoder(base64_to_bits(compressed))
+        utf8_decoder = codecs.getincrementaldecoder("utf-8")()
         done = False
         while not done:
-            start_idx = max(0, len(tokens) - window_overlap)
+            start_idx = max(0, len(seen_tokens) - window_overlap)
             consume(
                 self.model.generate(
-                    tokens=[self.model.token_bos()] + tokens[start_idx:],
+                    tokens=[self.model.token_bos()] + seen_tokens[start_idx:],
                     temp=0.0,
                     logits_processor=process_logits,
                     stopping_criteria=should_stop,
                 )
             )
-        return decompressed.decode("utf-8")
+        return decompressed
 
 
 def make_arg_parser():
     parser = argparse.ArgumentParser(
-        description="Compress and decompress text using a large language model"
+        description="LLM-powered lossless compression tool"
     )
     parser.add_argument("model_path", help="path to model file")
     parser.add_argument(
@@ -361,18 +471,31 @@ def main():
 
     try:
         if args.string is not None:
-            uncompressed = " ".join(args.string) if args.string else sys.stdin.read()
+            uncompressed = (
+                " ".join(args.string).encode("utf-8")
+                if args.string
+                else sys.stdin.buffer.read()
+            )
             compressor.compress(uncompressed, window_overlap)
         elif args.compressed is not None:
             compressed = (
-                args.compressed[0] if args.compressed else sys.stdin.read().strip()
+                args.compressed[0].encode("utf-8")
+                if args.compressed
+                else sys.stdin.buffer.read()
             )
             if not all(char in BASE64 for char in compressed):
-                parser.error("invalid compressed string")
+                parser.error("compressed data must be base64-encoded")
             compressor.decompress(compressed, window_overlap)
         elif args.interactive:
             while True:
-                string = input("≥≥≥ ")
+                try:
+                    string = input("≥≥≥ ").encode("utf-8")
+                except UnicodeDecodeError:
+                    print(
+                        "error: interactive mode only supports UTF-8 input",
+                        file=sys.stderr,
+                    )
+                    continue
                 if string and all(char in BASE64 for char in string):
                     try:
                         compressor.decompress(string, window_overlap)
@@ -381,8 +504,6 @@ def main():
                 else:
                     compressor.compress(string, window_overlap)
                 print("\n", file=sys.stderr)
-    except UnicodeDecodeError:
-        parser.error("input must be valid UTF-8-encoded text")
     except KeyboardInterrupt:
         print(file=sys.stderr)
 

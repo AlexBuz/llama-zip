@@ -1,21 +1,19 @@
 # llama-zip
 
-`llama-zip` is a command-line utility for lossless text compression and decompression. It functions by leveraging a user-provided LLM (large language model) as the probabilistic model for an [arithmetic coder](https://en.wikipedia.org/wiki/Arithmetic_coding). This allows `llama-zip` to achieve high compression ratios for structured or natural language text, as fewer bits are needed to encode tokens that the model predicts with high confidence. By employing a sliding context window, `llama-zip` is not limited by the model's maximum context length and can handle arbitrarily long input text. The main limitation of `llama-zip` is that the speed of compression and decompression is limited by the model's inference speed.
+llama-zip is a lossless data compression utility that leverages a user-provided LLM (large language model) as the probabilistic model for an [arithmetic coder](https://en.wikipedia.org/wiki/Arithmetic_coding). This allows llama-zip to achieve high compression ratios on structured or natural language text, since few bits are needed to encode tokens that the model predicts with high confidence. By employing a sliding context window, llama-zip is not limited by the context length of the LLM used and can compress strings of arbitrary length. Furthermore, by encoding non-UTF-8 bytes using code points in Unicode's private use areas, llama-zip is not limited to text inputs and can handle arbitrary binary data, albeit with reduced compression ratios.
 
 ![Interactive Mode Demo: Lorem Ipsum Text](lorem_ipsum_demo.gif)
 
 ## Compression Performance
 
-In the table below, the compression ratios achieved by `llama-zip` on the text files of the [Calgary Corpus](http://www.data-compression.info/Corpora/CalgaryCorpus/) (as well as on `llama-zip`'s own source code) are compared to other popular or high-performance compression utilities. Compression ratios are calculated by dividing the number of bytes in the uncompressed input by the number of bytes in the compressed output, so higher values indicate more effective compression.
+In the table below, the compression ratios achieved by llama-zip on the text files of the [Calgary Corpus](http://www.data-compression.info/Corpora/CalgaryCorpus/) (as well as on llama-zip's own source code, `llama_zip.py`) are compared to other popular or high-performance compression utilities. Compression ratios are calculated by dividing the number of bytes in the uncompressed input by the number of bytes in the compressed output, so higher values indicate more effective compression.
 
-For `llama-zip`, two models were benchmarked, with varying context lengths but with a consistent window overlap of 25%:
+For llama-zip, two different LLMs were benchmarked, with varying context lengths but with a consistent window overlap of 25% (see the [Options](#options) section below for information about these parameters). The models used were as follows:
 - [Phi-3 Mini-128K-Instruct (Q4_K_M)](https://huggingface.co/QuantFactory/Phi-3-mini-128k-instruct-GGUF)
   - "Phi&#8209;32k" - 32768-token context length
   - "Phi&#8209;8k" - 8192-token context length
 - [Llama 3 8B (Q4_K_M)](https://huggingface.co/QuantFactory/Meta-Llama-3-8B-GGUF)
   - "Llama-8k" - 8192-token context length (the maximum for this model)
-
-To learn more about the context length (`--n-ctx`) and window overlap (`--window-overlap`) parameters, see the [Options](#options) section below.
 
 For the other utilities, the maximum compression level offered was used.
 
@@ -45,7 +43,7 @@ pip3 install .
 
 ### LLM Download
 
-To use `llama-zip`, you must first download a model that is compatible with [llama.cpp](https://github.com/ggerganov/llama.cpp), such as [Llama 3 8B](https://huggingface.co/QuantFactory/Meta-Llama-3-8B-GGUF). Make sure to download a quantized version (one of the `.gguf` files listed on the "Files and versions" tab on Hugging Face) that is small enough to fit in your system's memory.
+To use llama-zip, you must download an LLM that is compatible with [llama.cpp](https://github.com/ggerganov/llama.cpp), such as [Llama 3 8B](https://huggingface.co/QuantFactory/Meta-Llama-3-8B-GGUF). Make sure to download a quantized version (one of the `.gguf` files listed on the "Files and versions" tab on Hugging Face) that is small enough to fit in your system's memory.
 
 ## CLI Usage
 
@@ -55,18 +53,18 @@ llama-zip <model_path> [options] <mode> [input]
 
 ### Modes
 
-`llama-zip` supports three modes of operation:
+llama-zip supports three modes of operation:
 
 1. **Compress mode** (specified by the `-c` or `--compress` flag): The string to be compressed can be provided as an argument or piped to stdin. The compressed output will be encoded in base64 and printed to stdout.
 2. **Decompress mode** (specified by the `-d` or `--decompress` flag): The compressed string can be provided as an argument or piped to stdin. The decompressed output will be printed to stdout.
 3. **Interactive mode** (specified by the `-i` or `--interactive` flag): A prompt is displayed where the user can enter strings to be compressed or decompressed. When a base64-encoded string is entered, it will be decompressed; otherwise, the entered string will be compressed. After each compression or decompression operation, the user is prompted to enter another string. To exit interactive mode, press `Ctrl+C`.
-    - **Note:** If you would like to compress a string that consists entirely of base64 characters (i.e., letters, numbers, `+`, and `/`, without any other symbols or spaces), you must use compression mode directly, as interactive mode assumes that base64-encoded strings are meant to be decompressed and will result in nonsensical output if the input did not come from a compression operation. Alternatively, you can add a non-base64 character to your string (such as a space at the end) if you don't mind your string being compressed with that extra character.
+    - **Note:** If you would like to compress a string that consists entirely of base64 characters (i.e., letters, numbers, `+`, and `/`, without any other symbols or spaces), you must use compression mode directly, as interactive mode assumes that base64-encoded strings are meant to be decompressed and will result in nonsensical output if the input did not come from a compression operation. Alternatively, you can add a non-base64 character to your string (such as a space at the end) if you don't mind that character being compressed along with the rest of the string.
 
 ### Options
 
-- `-w`, `--window-overlap`: The number of tokens to overlap between the end of the previous context window and the start of the next window, when compressing a string whose length exceeds the model's maximum context length. This can be specified as a percentage of the model's context length or as a fixed number of tokens. The default is `0%`, meaning that the context window is cleared entirely when it is filled. Higher values can improve compression ratios but will slow down compression and decompression, since parts of the text will need to be re-evaluated when the context window slides. Note that when decompressing, the window overlap must be set to the same value that was used during compression in order to recover the original text.
-- `--n-ctx`: The number of tokens to use as the context length for the model. This must be less than or equal to the model's maximum context length. If set to `0` (the default), then the model's maximum context length will be used.
-- `--n-gpu-layers`: The number of model layers to offload to the GPU. This can significantly speed up compression and decompression, especially for larger models. If set to `-1` (the default), then all layers will be offloaded. See the [llama.cpp repository](https://github.com/ggerganov/llama.cpp) for more information.
+- `-w`, `--window-overlap`: The number of tokens to overlap between the end of the previous context window and the start of the next window, when compressing a string whose length exceeds the model's maximum context length. This can be specified as a percentage of the model's context length or as a fixed number of tokens. The default is `0%`, meaning that the context window is cleared entirely when it is filled. Higher values can improve compression ratios but will slow down compression and decompression. Note that when decompressing, the window overlap must be set to the same value that was used during compression in order to reconstruct the original string.
+- `--n-ctx`: The number of tokens to use as the context length for the model. This must be less than or equal to the model's maximum context length. If set to `0` (the default), then the model's maximum context length will be used. Note that when decompressing, the context length must be set to the same value that was used during compression in order to reconstruct the original string.
+- `--n-gpu-layers`: The number of model layers to offload to the GPU. This can significantly speed up compression and decompression, especially for larger models. If set to `-1` (the default), then all layers will be offloaded. See the [llama.cpp repository](https://github.com/ggerganov/llama.cpp) for more information. In [practice](#limitations), the same number of layers should be offloaded during compression and decompression.
 - `--use-mlock`: Force your system to keep the entire model in memory. This can be useful for larger models but may cause your system to run out of memory if the model is too large. Disabled by default.
 
 ### Examples
@@ -80,13 +78,13 @@ llama-zip <model_path> [options] <mode> [input]
     # Output: SxapgbY
     ```
 
-- Compressing text from a file:
+- Compressing the contents of a file:
     ```sh
     llama-zip /path/to/Meta-Llama-3-8B.Q8_0.gguf -c < /path/to/gettysburg_address.txt
     # Output: 4vTMmKKTXWAcNZwPwkqN84
     ```
 
-- Compressing text from a file and saving the output to another file:
+- Compressing the contents of a file and writing the output to another file:
     ```sh
     llama-zip /path/to/Meta-Llama-3-8B.Q8_0.gguf -c < /path/to/input.txt > /path/to/output.compressed
     ```
@@ -98,34 +96,41 @@ llama-zip <model_path> [options] <mode> [input]
     # Output: The quick brown fox jumps over the lazy dog.
     ```
 
-- Decompressing text from a file:
+- Decompressing the contents of a file:
     ```sh
     llama-zip /path/to/Meta-Llama-3-8B.Q8_0.gguf -d < /path/to/input.compressed
     # Output: [decompressed text]
     ```
 
-- Decompressing text from a file and saving the output to another file:
+- Decompressing the contents of a file and writing the output to another file:
     ```sh
     llama-zip /path/to/Meta-Llama-3-8B.Q8_0.gguf -d < /path/to/input.compressed > /path/to/output.txt
     ```
 
 ## API Usage
 
-The `LlamaZip` class can be used to compress and decompress strings programmatically. The `compress` method takes a string as input and returns the compressed output as a base64-encoded string. The `decompress` method takes a compressed base64-encoded string as input and returns the decompressed string. Here is an example:
+The `LlamaZip` class can be used to compress and decompress data programmatically. The `compress` method takes a `bytes` object and returns a another `bytes` object containing the compressed data. The `decompress` method takes the compressed data and returns the original data.
 
 ```python
 from llama_zip import LlamaZip
 
-# Initialize the compressor and load an LLM
+# Initialize the compressor
 compressor = LlamaZip(model_path="/path/to/model.gguf")
 
-# Compress a string
-string = "The quick brown fox jumps over the lazy dog."
-compressed_base64 = compressor.compress(string)
+# Compress some data
+original = b"The quick brown fox jumps over the lazy dog."
+compressed = compressor.compress(original)
 
-# Reconstruct the original string
-decompressed_string = compressor.decompress(compressed_base64)
-assert string == decompressed_string
+# Decompress the data
+decompressed = compressor.decompress(compressed)
+assert decompressed == original
 ```
 
 The `LlamaZip` constructor also accepts the `n_ctx`, `n_gpu_layers`, and `use_mlock` arguments, which correspond to the CLI options of the same names. The `window_overlap` argument can be passed to the `compress` and `decompress` methods directly to specify the window overlap for that particular operation.
+
+
+## Limitations
+
+1. **Speed:** Compression and decompression speeds are limited by the speed of LLM inference. This renders llama-zip significantly slower than traditional compression utilities. However, the compression ratios achieved by llama-zip may justify the trade-off in speed for certain use cases.
+2. **Portability:** llama-zip requires identical LLM behavior during compression and decompression. However, the backend that llama-zip uses for LLM inference, [llama.cpp](https://github.com/ggerganov/llama.cpp), does not currently guarantee deterministic behavior. This limits the portability of the compressed output of llama-zip, as it may not be decompressible on a different system, even if the same model is used. In practice, behavior also differs depending on the number of GPU layers offloaded, so the `--n-gpu-layers` option should be set to the same value during compression and decompression, in addition to the window overlap (`--window-overlap`) and context length (`--n-ctx`) options.
+3. **Binary Compression:** Due to its reliance on an LLM for prediction, llama-zip is best suited for compressing inputs that consist primarily of structured or natural language text. Although llama-zip can handle binary data by encoding invalid UTF-8 bytes using code points in Unicode's private use areas, it may not achieve high compression ratios on such data, potentially even increasing the size of the input.

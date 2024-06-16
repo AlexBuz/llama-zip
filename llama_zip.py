@@ -1,8 +1,8 @@
 import argparse
+import base64
 import codecs
 import signal
 import sys
-from collections import deque
 
 import numpy as np
 from llama_cpp import Llama
@@ -10,9 +10,13 @@ from more_itertools import consume
 from tqdm import tqdm
 
 
+PUA_START = 0xE000
+
 NUM_STATE_BITS = 64
 FREQ_SCALE_FACTOR = 1 << 32
+
 BASE64 = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+BASE64_EQ = BASE64 + b"="
 
 
 class ArithmeticCoderBase:
@@ -50,7 +54,8 @@ class ArithmeticCoderBase:
 class Encoder(ArithmeticCoderBase):
     def __init__(self):
         super().__init__()
-        self.encoded_data = []
+        self.encoded_data = bytearray()
+        self.bit_index = 8
         self.num_underflow = 0
 
     def get_encoded(self):
@@ -60,22 +65,32 @@ class Encoder(ArithmeticCoderBase):
         self.update(cum_freqs, symbol)
 
     def finish(self):
-        self.encoded_data.append(1)
+        self.append_bit(1)
 
     def shift(self):
         bit = self.low >> (NUM_STATE_BITS - 1)
-        self.encoded_data.append(bit)
-        self.encoded_data.extend([bit ^ 1] * self.num_underflow)
+        self.append_bit(bit)
+        for _ in range(self.num_underflow):
+            self.append_bit(bit ^ 1)
         self.num_underflow = 0
 
     def underflow(self):
         self.num_underflow += 1
 
+    def append_bit(self, bit):
+        if self.bit_index == 8:
+            self.encoded_data.append(0)
+            self.bit_index = 0
+        self.encoded_data[-1] |= bit << (7 - self.bit_index)
+        self.bit_index += 1
+
 
 class Decoder(ArithmeticCoderBase):
-    def __init__(self, encoded_bits):
+    def __init__(self, data: bytes):
         super().__init__()
-        self.input = deque(encoded_bits)
+        self.input = data
+        self.byte_index = 0
+        self.bit_index = 0
         self.code = sum(
             self.read_code_bit() << i for i in range(NUM_STATE_BITS - 1, -1, -1)
         )
@@ -100,12 +115,18 @@ class Decoder(ArithmeticCoderBase):
         )
 
     def read_code_bit(self):
-        return self.input.popleft() if len(self.input) else 0
+        if self.byte_index >= len(self.input):
+            return 0
+        bit = (self.input[self.byte_index] >> (7 - self.bit_index)) & 1
+        self.bit_index = (self.bit_index + 1) % 8
+        if self.bit_index == 0:
+            self.byte_index += 1
+        return bit
 
 
 # Based on Rust's std::str::Utf8Chunks
 class Utf8Chunks:
-    def __init__(self, source):
+    def __init__(self, source: bytes):
         self.source = source
 
     def __iter__(self):
@@ -181,22 +202,25 @@ class Utf8Chunks:
         self.source = remaining
 
         valid, invalid = inspected[:valid_up_to], inspected[valid_up_to:]
-        return valid, invalid
+        return Utf8Chunk(valid, invalid)
 
 
-PUA_START = 0xE000
+class Utf8Chunk:
+    def __init__(self, valid: bytes, invalid: bytes):
+        self.valid = valid
+        self.invalid = invalid
 
 
 def bytes_to_utf8(data: bytes):
     output = bytearray()
-    for valid, invalid in Utf8Chunks(data):
-        for char in valid.decode("utf-8"):
+    for chunk in Utf8Chunks(data):
+        for char in chunk.valid.decode("utf-8"):
             if PUA_START <= ord(char) <= PUA_START + 0xFF:
                 for byte in char.encode("utf-8"):
                     output.extend(chr(PUA_START + byte).encode("utf-8"))
             else:
                 output.extend(char.encode("utf-8"))
-        for byte in invalid:
+        for byte in chunk.invalid:
             output.extend(chr(PUA_START + byte).encode("utf-8"))
     return bytes(output)
 
@@ -250,16 +274,6 @@ class LlamaZip:
         return cum_freqs
 
     def compress(self, uncompressed: bytes, window_overlap=0) -> bytes:
-        def bits_to_base64(bits):
-            while bits and bits[-1] == 0:
-                bits.pop()
-            while len(bits) % 6 != 0:
-                bits.append(0)
-            return bytes(
-                BASE64[int("".join(str(bit) for bit in bits[i : i + 6]), 2)]
-                for i in range(0, len(bits), 6)
-            )
-
         def sigint_handler(*_):
             nonlocal interrupted
             interrupted = True
@@ -316,10 +330,7 @@ class LlamaZip:
         progress_bar.close()
 
         token_encoder.finish()
-        compressed = bits_to_base64(token_encoder.get_encoded())
-        if self.verbose:
-            sys.stdout.buffer.write(compressed)
-            sys.stdout.buffer.flush()
+        compressed = token_encoder.get_encoded()
 
         signal.signal(signal.SIGINT, s)
 
@@ -332,10 +343,6 @@ class LlamaZip:
         return self.model.detokenize(tokenized) == double_space
 
     def decompress(self, compressed: bytes, window_overlap=0) -> bytes:
-        def base64_to_bits(string):
-            bits = [int(bit) for char in string for bit in f"{BASE64.index(char):06b}"]
-            return bits
-
         def process_logits(_, logits):
             cdf = self.compute_cdf(logits)
             next_token = token_decoder.decode_symbol(cdf)
@@ -366,7 +373,7 @@ class LlamaZip:
         self.model.reset()
         seen_tokens = []
         decompressed = bytearray()
-        token_decoder = Decoder(base64_to_bits(compressed))
+        token_decoder = Decoder(compressed)
         utf8_decoder = codecs.getincrementaldecoder("utf-8")()
         done = False
         while not done:
@@ -387,6 +394,12 @@ def make_arg_parser():
         description="LLM-powered lossless compression tool"
     )
     parser.add_argument("model_path", help="path to model file")
+    parser.add_argument(
+        "-f",
+        "--compressed-format",
+        choices=["binary", "base64"],
+        help="format of compressed data (default: binary, except for interactive mode, which only supports base64)",
+    )
     parser.add_argument(
         "-w",
         "--window-overlap",
@@ -438,9 +451,20 @@ def make_arg_parser():
     return parser
 
 
+def robust_b64decode(input_bytes):
+    filtered_base64 = bytes(byte for byte in input_bytes if byte in BASE64)
+    padded_base64 = filtered_base64 + b"A" * (-len(filtered_base64) % 4)
+    return base64.b64decode(padded_base64)
+
+
 def main():
     parser = make_arg_parser()
     args = parser.parse_args()
+
+    if args.compressed_format is None:
+        args.compressed_format = "base64" if args.interactive else "binary"
+    elif args.interactive and args.compressed_format != "base64":
+        parser.error("interactive mode only supports base64 compressed data")
 
     compressor = LlamaZip(
         model_path=args.model_path,
@@ -476,33 +500,41 @@ def main():
                 if args.string
                 else sys.stdin.buffer.read()
             )
-            compressor.compress(uncompressed, window_overlap)
+            compressed = compressor.compress(uncompressed, window_overlap)
+            if args.compressed_format == "base64":
+                compressed = base64.b64encode(compressed)
+            sys.stdout.buffer.write(compressed)
+            sys.stdout.buffer.flush()
         elif args.compressed is not None:
             compressed = (
                 args.compressed[0].encode("utf-8")
                 if args.compressed
                 else sys.stdin.buffer.read()
             )
-            if not all(char in BASE64 for char in compressed):
-                parser.error("compressed data must be base64-encoded")
+            if args.compressed_format == "base64":
+                compressed = robust_b64decode(compressed)
             compressor.decompress(compressed, window_overlap)
         elif args.interactive:
             while True:
                 try:
-                    string = input("≥≥≥ ").encode("utf-8")
+                    input_bytes = input("≥≥≥ ").encode("utf-8")
                 except UnicodeDecodeError:
                     print(
                         "error: interactive mode only supports UTF-8 input",
                         file=sys.stderr,
                     )
                     continue
-                if string and all(char in BASE64 for char in string):
+                if input_bytes and all(byte in BASE64_EQ for byte in input_bytes):
                     try:
-                        compressor.decompress(string, window_overlap)
+                        compressed = robust_b64decode(input_bytes)
+                        compressor.decompress(compressed, window_overlap)
                     except KeyboardInterrupt:
                         pass
                 else:
-                    compressor.compress(string, window_overlap)
+                    compressed = compressor.compress(input_bytes, window_overlap)
+                    compressed = base64.b64encode(compressed)
+                    sys.stdout.buffer.write(compressed)
+                    sys.stdout.buffer.flush()
                 print("\n", file=sys.stderr)
     except KeyboardInterrupt:
         print(file=sys.stderr)

@@ -1,6 +1,6 @@
 # llama-zip
 
-llama-zip is a lossless data compression utility that leverages a user-provided LLM (large language model) as the probabilistic model for an [arithmetic coder](https://en.wikipedia.org/wiki/Arithmetic_coding). This allows llama-zip to achieve high compression ratios on structured or natural language text, since few bits are needed to encode tokens that the model predicts with high confidence. By employing a sliding context window, llama-zip is not limited by the context length of the LLM used and can compress strings of arbitrary length. Furthermore, by encoding non-UTF-8 bytes using code points in Unicode's private use areas, llama-zip is not limited to text inputs and can handle arbitrary binary data, albeit with reduced compression ratios.
+llama-zip is a lossless compression utility that leverages a user-provided LLM (large language model) as the probabilistic model for an [arithmetic coder](https://en.wikipedia.org/wiki/Arithmetic_coding). This allows llama-zip to achieve high compression ratios on structured or natural language text, since few bits are needed to encode tokens that the model predicts with high confidence. By employing a sliding context window, llama-zip is not limited by the context length of the LLM and can compress strings of arbitrary length. Furthermore, by encoding invalid UTF-8 bytes using code points in Unicode's private use areas, llama-zip is not limited to text inputs and can handle arbitrary binary data, albeit with reduced compression ratios compared to text inputs.
 
 ![Interactive Mode Demo: Lorem Ipsum Text](lorem_ipsum_demo.gif)
 
@@ -48,7 +48,7 @@ To use llama-zip, you must download an LLM that is compatible with [llama.cpp](h
 ## CLI Usage
 
 ```
-llama-zip <model_path> [options] <mode> [input]
+llama-zip <llm_path> [options] <mode> [input]
 ```
 
 ### Modes
@@ -70,43 +70,40 @@ llama-zip supports three modes of operation:
 
 ### Examples
 
-[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/drive/1hKL-ZVucgbVcZnEi9NyfjMIJ_PrTKMEW?usp=sharing)
-
 #### Compression
-- Compressing a string:
+
+- Compress a file:
     ```sh
-    llama-zip /path/to/Meta-Llama-3-8B.Q8_0.gguf -c "The quick brown fox jumps over the lazy dog."
-    # Output: SxapgbY
+    llama-zip /path/to/llm.gguf -c < input.txt > compressed.llzp
     ```
 
-- Compressing the contents of a file:
+- Compress a string and print the compressed output in base64 format:
     ```sh
-    llama-zip /path/to/Meta-Llama-3-8B.Q8_0.gguf -c < /path/to/gettysburg_address.txt
-    # Output: 4vTMmKKTXWAcNZwPwkqN84
-    ```
-
-- Compressing the contents of a file and writing the output to another file:
-    ```sh
-    llama-zip /path/to/Meta-Llama-3-8B.Q8_0.gguf -c < /path/to/input.txt > /path/to/output.compressed
+    llama-zip /path/to/llm.gguf -f base64 -c "The quick brown fox jumps over the lazy dog."
     ```
 
 #### Decompression
-- Decompressing a compressed string:
+
+- Decompress a file:
     ```sh
-    llama-zip /path/to/Meta-Llama-3-8B.Q8_0.gguf -d SxapgbY
-    # Output: The quick brown fox jumps over the lazy dog.
+    llama-zip /path/to/llm.gguf -d < compressed.llzp > output.txt
     ```
 
-- Decompressing the contents of a file:
+- Decompress a base64-encoded compressed string:
     ```sh
-    llama-zip /path/to/Meta-Llama-3-8B.Q8_0.gguf -d < /path/to/input.compressed
-    # Output: [decompressed text]
+    llama-zip /path/to/llm.gguf -f base64 -d BASE64_STRING
     ```
 
-- Decompressing the contents of a file and writing the output to another file:
+#### Interactive Mode
+
+- Start an interactive mode session:
     ```sh
-    llama-zip /path/to/Meta-Llama-3-8B.Q8_0.gguf -d < /path/to/input.compressed > /path/to/output.txt
+    llama-zip /path/to/llm.gguf -i
     ```
+
+#### Colab Notebook
+
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/drive/1hKL-ZVucgbVcZnEi9NyfjMIJ_PrTKMEW?usp=sharing)
 
 ## API Usage
 
@@ -129,7 +126,6 @@ assert decompressed == original
 ```
 
 The `LlamaZip` constructor also accepts the `n_ctx`, `n_gpu_layers`, and `use_mlock` arguments, which correspond to the CLI options of the same names. The `window_overlap` argument can be passed to the `compress` and `decompress` methods directly to specify the window overlap for that particular operation.
-
 
 ## Limitations
 

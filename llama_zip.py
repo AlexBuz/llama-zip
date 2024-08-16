@@ -268,7 +268,7 @@ class LlamaZip:
 
     def compute_cdf(self, logits):
         logprobs = self.model.logits_to_logprobs(logits)
-        probs = np.exp(logprobs)
+        probs = np.exp(logprobs).astype(np.float64)
         freqs = np.maximum(1, np.round(FREQ_SCALE_FACTOR * probs))
         cum_freqs = np.cumsum(freqs)
         return cum_freqs

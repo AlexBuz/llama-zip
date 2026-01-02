@@ -292,9 +292,9 @@ class LlamaZip:
             logits[next_token] = np.inf
             return logits
 
-        def should_stop(tokens_so_far, logits):
+        def should_stop(tokens_so_far, _):
             return (
-                np.argmax(logits) == self.model.token_eos()
+                next_token_idx == len(tokens)
                 or len(tokens_so_far) == self.model.n_ctx()
             )
 
@@ -323,7 +323,7 @@ class LlamaZip:
                 self.model.generate(
                     tokens=[self.model.token_bos()] + tokens[start_idx:next_token_idx],
                     temp=0.0,
-                    logits_processor=process_logits,
+                    logits_processor=[process_logits],
                     stopping_criteria=should_stop,
                 )
             )
@@ -348,6 +348,8 @@ class LlamaZip:
             next_token = token_decoder.decode_symbol(cdf)
             logits[next_token] = np.inf
             if next_token == self.model.token_eos():
+                nonlocal done
+                done = True
                 return logits
             next_utf8 = self.model.detokenize([next_token])
             if (
@@ -364,10 +366,7 @@ class LlamaZip:
                 sys.stdout.buffer.flush()
             return logits
 
-        def should_stop(tokens_so_far, logits):
-            nonlocal done
-            if np.argmax(logits) == self.model.token_eos():
-                done = True
+        def should_stop(tokens_so_far, _):
             return done or len(tokens_so_far) == self.model.n_ctx()
 
         self.model.reset()
@@ -382,7 +381,7 @@ class LlamaZip:
                 self.model.generate(
                     tokens=[self.model.token_bos()] + seen_tokens[start_idx:],
                     temp=0.0,
-                    logits_processor=process_logits,
+                    logits_processor=[process_logits],
                     stopping_criteria=should_stop,
                 )
             )

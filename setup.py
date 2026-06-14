@@ -5,8 +5,8 @@ with open("requirements.txt") as f:
 
 setup(
     name="llama-zip",
-    version="0.9.1",
-    description="LLM-powered compression tool",
+    version="0.9.2",
+    description="LLM-powered lossless compression tool",
     author="Alexander Buzanis",
     packages=find_packages(),
     py_modules=["llama_zip"],

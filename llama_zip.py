@@ -1,11 +1,12 @@
 import argparse
 import base64
 import codecs
+import ctypes
 import signal
 import sys
 
 import numpy as np
-from llama_cpp import Llama
+from llama_cpp import Llama, llama_model_get_vocab, llama_token_to_piece
 from more_itertools import consume
 from tqdm import tqdm
 
@@ -343,6 +344,22 @@ class LlamaZip:
         return self.model.detokenize(tokenized) == double_space
 
     def decompress(self, compressed: bytes, window_overlap=0) -> bytes:
+        vocab = llama_model_get_vocab(self.model.model)
+        bos = self.model.token_bos()
+        piece_buffer = ctypes.create_string_buffer(32)
+
+        def token_bytes(token):
+            nonlocal piece_buffer
+            while True:
+                size = llama_token_to_piece(
+                    vocab, token, piece_buffer, len(piece_buffer), 0, False
+                )
+                if size >= 0:
+                    piece = piece_buffer[:size]
+                    return piece.removeprefix(b" ") if token == bos else piece
+                # On overflow llama.cpp returns the required byte count negated.
+                piece_buffer = ctypes.create_string_buffer(-size)
+
         def process_logits(_, logits):
             cdf = self.compute_cdf(logits)
             next_token = token_decoder.decode_symbol(cdf)
@@ -351,7 +368,7 @@ class LlamaZip:
                 nonlocal done
                 done = True
                 return logits
-            next_utf8 = self.model.detokenize([next_token])
+            next_utf8 = token_bytes(next_token)
             if (
                 len(seen_tokens) == 0
                 and next_utf8.startswith(b" ")
